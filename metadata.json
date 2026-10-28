@@ -1,0 +1,6 @@
+{
+  "name": "AURA - Stillness Designed To Awaken",
+  "description": "A single-viewport full-bleed meditation experience engineered for deep focus, neural stillness, and bio-harmonic peace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
