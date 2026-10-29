@@ -843,12 +843,20 @@ body {
   display: grid;
   place-items: center;
   font-size: 12px;
-  transition: transform 0.2s, background 0.2s;
+  transition: transform 0.2s, background 0.2s, box-shadow 0.2s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .play-freq-btn:hover {
   transform: scale(1.08);
   background: var(--teal-accent);
+}
+
+.play-freq-btn.playing {
+  background: var(--teal-accent);
+  color: #021a15;
+  box-shadow: 0 0 16px rgba(45, 212, 191, 0.6);
 }
 
 .soundscape-title {
@@ -1421,9 +1429,16 @@ body {
   }
 
   .headline {
-    letter-spacing: -0.07em;
+    font-size: clamp(31px, 8.4vw, 44px);
+    letter-spacing: -0.06em;
     line-height: 1.08;
     margin-bottom: clamp(12px, 1.8vh, 18px);
+  }
+
+  .play-freq-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 14px;
   }
 
   .stats-footer {
@@ -1465,8 +1480,9 @@ body {
   }
 
   .headline {
-    letter-spacing: -0.09em;
-    line-height: 1.04;
+    font-size: clamp(31px, 8.8vw, 36px);
+    letter-spacing: -0.08em;
+    line-height: 1.05;
   }
 
   .subhead {

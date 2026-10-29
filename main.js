@@ -325,88 +325,140 @@ function initSoundEngine() {
   function getAudioContext() {
     if (!audioCtx) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new AudioContextClass();
-    }
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume();
+      if (AudioContextClass) {
+        audioCtx = new AudioContextClass();
+      }
     }
     return audioCtx;
   }
 
-  function startAmbient(customFreq = 432) {
+  // Pre-unlock Web Audio on first user interaction (touch/pointer/click)
+  const unlockAudio = () => {
+    try {
+      const ctx = getAudioContext();
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume();
+      }
+    } catch (_) {}
+  };
+
+  ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'keydown'].forEach((evt) => {
+    window.addEventListener(evt, unlockAudio, { capture: true, passive: true });
+  });
+
+  async function ensureAudioReady() {
     const ctx = getAudioContext();
+    if (!ctx) return null;
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.warn('Audio resume error:', e);
+      }
+    }
+    return ctx;
+  }
+
+  async function startAmbient(customFreq = 432) {
+    const ctx = await ensureAudioReady();
+    if (!ctx) return;
 
     if (!masterGain) {
       masterGain = ctx.createGain();
       masterGain.connect(ctx.destination);
     }
 
-    masterGain.gain.setValueAtTime(0.001, ctx.currentTime);
-    masterGain.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + 2.5);
+    const now = ctx.currentTime;
+
+    // Smooth, audible volume ramp optimized for mobile speakers and headphones alike
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(Math.max(masterGain.gain.value, 0.02), now);
+    masterGain.gain.linearRampToValueAtTime(0.50, now + 0.3);
 
     stopCurrentOscillators();
 
-    // Fundamental tone
+    // 1. Primary fundamental tone
     const osc1 = ctx.createOscillator();
     osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(customFreq, ctx.currentTime);
+    osc1.frequency.setValueAtTime(customFreq, now);
 
-    // Warm sub-harmonic
+    // 2. Harmonic body / sub-anchor tone
     const osc2 = ctx.createOscillator();
     osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(customFreq / 2, ctx.currentTime);
+    // For low frequencies (108Hz, 216Hz), maintain audible tone body
+    osc2.frequency.setValueAtTime(customFreq <= 216 ? customFreq * 1.5 : customFreq / 2, now);
 
-    // Theta wave binaural pulse (4Hz delta/theta difference)
+    // 3. Theta wave binaural pulse (creates soothing 4Hz ambient flutter)
     const osc3 = ctx.createOscillator();
     osc3.type = 'sine';
-    osc3.frequency.setValueAtTime(customFreq + 4, ctx.currentTime);
+    osc3.frequency.setValueAtTime(customFreq + 4, now);
+
+    // 4. Harmonic overtone (crucial for mobile phones!)
+    // Mobile micro-speakers roll off heavily below 250-300Hz. Generating the 2nd harmonic (freq * 2)
+    // enables mobile speakers to audibly resonate and produce full acoustic presence.
+    const oscHarmonic = ctx.createOscillator();
+    oscHarmonic.type = 'sine';
+    oscHarmonic.frequency.setValueAtTime(customFreq * 2, now);
+
+    const harmonicGain = ctx.createGain();
+    // Stronger overtone presence for sub-frequencies (108Hz, 216Hz) so mobile speakers project clearly
+    harmonicGain.gain.setValueAtTime(customFreq <= 216 ? 0.38 : 0.16, now);
+    oscHarmonic.connect(harmonicGain);
 
     const oscGain = ctx.createGain();
-    oscGain.gain.setValueAtTime(0.3, ctx.currentTime);
+    oscGain.gain.setValueAtTime(0.55, now);
 
     osc1.connect(oscGain);
     osc2.connect(oscGain);
     osc3.connect(oscGain);
+    harmonicGain.connect(oscGain);
     oscGain.connect(masterGain);
 
-    osc1.start();
-    osc2.start();
-    osc3.start();
+    osc1.start(now);
+    osc2.start(now);
+    osc3.start(now);
+    oscHarmonic.start(now);
 
-    activeOscs = [osc1, osc2, osc3];
+    activeOscs = [osc1, osc2, osc3, oscHarmonic];
 
-    // Atmospheric warm filtered noise
+    // Atmospheric warm filtered noise for organic texture
     if (!noiseSource) {
-      const bufferSize = ctx.sampleRate * 2;
-      const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const output = noiseBuffer.getChannelData(0);
-      let b0 = 0, b1 = 0, b2 = 0;
-      for (let i = 0; i < bufferSize; i++) {
-        const white = Math.random() * 2 - 1;
-        b0 = 0.99886 * b0 + white * 0.055;
-        b1 = 0.99332 * b1 + white * 0.075;
-        b2 = 0.96900 * b2 + white * 0.15;
-        output[i] = (b0 + b1 + b2) * 0.07;
-      }
+      try {
+        const bufferSize = ctx.sampleRate * 2;
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0;
+        for (let i = 0; i < bufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.055;
+          b1 = 0.99332 * b1 + white * 0.075;
+          b2 = 0.96900 * b2 + white * 0.15;
+          output[i] = (b0 + b1 + b2) * 0.07;
+        }
 
-      noiseSource = ctx.createBufferSource();
-      noiseSource.buffer = noiseBuffer;
-      noiseSource.loop = true;
+        noiseSource = ctx.createBufferSource();
+        noiseSource.buffer = noiseBuffer;
+        noiseSource.loop = true;
 
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(280, ctx.currentTime);
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(340, now);
 
-      noiseSource.connect(filter);
-      filter.connect(masterGain);
-      noiseSource.start();
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.08, now);
+
+        noiseSource.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(masterGain);
+        noiseSource.start(now);
+      } catch (_) {}
     }
 
     isPlayingAmbient = true;
     if (ambientBtn) {
       ambientBtn.classList.add('playing');
       ambientBtn.innerHTML = '<i class="fa-solid fa-volume-high"></i>';
-      ambientBtn.setAttribute('title', 'Pause ambient sound');
+      ambientBtn.setAttribute('title', 'Pause ambient resonance');
     }
   }
 
@@ -423,8 +475,10 @@ function initSoundEngine() {
   function stopAmbient() {
     if (!masterGain || !audioCtx) return;
 
-    masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
-    masterGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 1);
+    const now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+    masterGain.gain.linearRampToValueAtTime(0.001, now + 0.5);
 
     setTimeout(() => {
       stopCurrentOscillators();
@@ -442,34 +496,39 @@ function initSoundEngine() {
         ambientBtn.setAttribute('title', 'Play 432Hz ambient resonance');
       }
       if (currentActiveFreqBtn) {
+        currentActiveFreqBtn.classList.remove('playing');
         currentActiveFreqBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
         currentActiveFreqBtn = null;
       }
-    }, 1050);
+    }, 520);
   }
 
   if (ambientBtn) {
-    ambientBtn.addEventListener('click', () => {
+    ambientBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
       if (isPlayingAmbient) {
         stopAmbient();
       } else {
-        startAmbient(432);
+        await startAmbient(432);
       }
     });
   }
 
-  // Interactive Frequency Cards in Soundscape section
+  // Interactive Frequency Cards in Acoustic Bio-Resonance section
   freqButtons.forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
       const freq = parseFloat(btn.dataset.freq || '432');
 
       if (currentActiveFreqBtn === btn && isPlayingAmbient) {
         stopAmbient();
       } else {
         if (currentActiveFreqBtn) {
+          currentActiveFreqBtn.classList.remove('playing');
           currentActiveFreqBtn.innerHTML = '<i class="fa-solid fa-play"></i>';
         }
-        startAmbient(freq);
+        await startAmbient(freq);
+        btn.classList.add('playing');
         btn.innerHTML = '<i class="fa-solid fa-pause"></i>';
         currentActiveFreqBtn = btn;
       }
