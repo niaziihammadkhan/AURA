@@ -5,6 +5,7 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+  initBackgroundVideo();
   initHeroStatsCounter();
   initScrollHeader();
   initScrollReveals();
@@ -13,6 +14,44 @@ document.addEventListener('DOMContentLoaded', () => {
   initSoundEngine();
   initBreathworkModal();
 });
+
+/**
+ * Ensures background video plays reliably on mobile iOS Safari, Android Chrome, and low power mode.
+ */
+function initBackgroundVideo() {
+  const video = document.querySelector('.bg-video');
+  if (!video) return;
+
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.setAttribute('playsinline', '');
+  video.setAttribute('webkit-playsinline', '');
+
+  const startPlayback = () => {
+    video.muted = true;
+    const promise = video.play();
+    if (promise !== undefined) {
+      promise.catch(() => {});
+    }
+  };
+
+  startPlayback();
+
+  // If mobile browser policy requires user gesture, start immediately on first touch or scroll
+  const unlockOnInteraction = () => {
+    if (video.paused) {
+      startPlayback();
+    }
+    window.removeEventListener('touchstart', unlockOnInteraction);
+    window.removeEventListener('click', unlockOnInteraction);
+    window.removeEventListener('scroll', unlockOnInteraction);
+  };
+
+  window.addEventListener('touchstart', unlockOnInteraction, { passive: true, once: true });
+  window.addEventListener('click', unlockOnInteraction, { passive: true, once: true });
+  window.addEventListener('scroll', unlockOnInteraction, { passive: true, once: true });
+}
 
 /**
  * 1. HERO STATS COUNT-UP ANIMATION
